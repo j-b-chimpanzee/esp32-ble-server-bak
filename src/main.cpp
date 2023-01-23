@@ -35,8 +35,10 @@ bool sendOnlyOnce = false;
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
 
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define SERVICE_UUID        "00000000-0000-1000-8000-00805f9b34fb"
+//"4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "00002a1c-0000-1000-8000-00805f9b34fb"
+//"beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
 
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -101,7 +103,7 @@ void loop() {
 
     // notify changed value
     if (deviceConnected) {
-      String toSendValue = "4162636431323334200110112214301645028101ae2017024420ffffffffffff206e201601f72070201701f52072201701f42078201601f3ffffffffffffffffffffffffffffffffffffffffffffffff";//data to be send
+      String toSendValue = "Some text to be send. Or a loooomg text which test the MTU size. This one is a short text TEST.";//data to be send
       int str_len = toSendValue.length() + 1;
       char char_array[str_len];
       toSendValue.toCharArray(char_array, str_len);
