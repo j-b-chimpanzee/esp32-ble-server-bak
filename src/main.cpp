@@ -1,141 +1,182 @@
-/*
-    Video: https://www.youtube.com/watch?v=oCMOYS71NIU
-    Based on Neil Kolban example for IDF: https://github.com/nkolban/esp32-snippets/blob/master/cpp_utils/tests/BLE%20Tests/SampleNotify.cpp
-    Ported to Arduino ESP32 by Evandro Copercini
-    updated by chegewara
+/*********
+  Rui Santos
+  Complete instructions at https://RandomNerdTutorials.com/esp32-ble-server-client/
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+*********/
 
-   Create a BLE server that, once we receive a connection, will send periodic notifications.
-   The service advertises itself as: 4fafc201-1fb5-459e-8fcc-c5c9c331914b
-   And has a characteristic of: beb5483e-36e1-4688-b7f5-ea07361b26a8
-
-   The design of creating the BLE server is:
-   1. Create a BLE Server
-   2. Create a BLE Service
-   3. Create a BLE Characteristic on the Service
-   4. Create a BLE Descriptor on the characteristic
-   5. Start the service.
-   6. Start advertising.
-
-   A connect hander associated with the server starts a background task that performs notification
-   every couple of seconds.
-*/
-#include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include <Wire.h>
+#include <Arduino.h>
 
-BLEServer* pServer = NULL;
-BLECharacteristic* pCharacteristic = NULL;
+//Default Temperature is in Celsius
+//Comment the next line for Temperature in Fahrenheit
+#define temperatureCelsius
+
+//BLE server name
+#define bleServerName "BLE BAK Test(ESP32)"
+
+//Adafruit_BME280 bme; // I2C
+
+BLEServer *pServer = NULL;//added
+
+float temp;
+float tempF;
+float hum;
+
+// Timer variables
+unsigned long lastTime = 0;
+unsigned long timerDelay = 5000;
+
 bool deviceConnected = false;
-bool oldDeviceConnected = false;
-uint32_t value = 0;
-bool sendOnlyOnce = false;
+bool oldDeviceConnected = false;//added
 
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
+#define SERVICE_UUID "3d7b0044-fbc5-4284-b0f5-710049ec62c9"
 
-#define SERVICE_UUID        "00000000-0000-1000-8000-00805f9b34fb"
-//"4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "00002a1c-0000-1000-8000-00805f9b34fb"
-//"beb5483e-36e1-4688-b7f5-ea07361b26a8"
+// Temperature Characteristic and Descriptor
+#ifdef temperatureCelsius
+  BLECharacteristic bmeTemperatureCelsiusCharacteristics("afd77861-8032-43a2-8369-a4f991913238", BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
+  BLEDescriptor bmeTemperatureCelsiusDescriptor(BLEUUID((uint16_t)0x2902));
+#else
+  BLECharacteristic bmeTemperatureFahrenheitCharacteristics("f78ebbff-c8b7-4107-93de-889a6a06d408", BLECharacteristic::PROPERTY_NOTIFY);
+  BLEDescriptor bmeTemperatureFahrenheitDescriptor(BLEUUID((uint16_t)0x2902));
+#endif
 
+// Humidity Characteristic and Descriptor
+BLECharacteristic bmeHumidityCharacteristics("6518ea87-cc4e-469e-8a7d-c7d99d822fbe", BLECharacteristic::PROPERTY_NOTIFY);
+BLEDescriptor bmeHumidityDescriptor(BLEUUID((uint16_t)0x2903));
 
+//Setup callbacks onConnect and onDisconnect
 class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      BLEDevice::startAdvertising();
-      
-    };
-
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-    }
+  void onConnect(BLEServer* pServer) {
+    deviceConnected = true;
+  };
+  void onDisconnect(BLEServer* pServer) {
+    deviceConnected = false;
+  }
 };
 
+void initBME(){
+  /*
+  if (!bme.begin(0x76)) {
+    Serial.println("Could not find a valid BME280 sensor, check wiring!");
+    while (1);
+  }
+  */
+}
 
-
-
-//************ 
+void checkToReconnect() //added
+{
+  // disconnected so advertise
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(500); // give the bluetooth stack the chance to get things ready
+    pServer->startAdvertising(); // restart advertising
+    Serial.println("Disconnected: start advertising");
+    oldDeviceConnected = deviceConnected;
+  }
+  // connected so reset boolean control
+  if (deviceConnected && !oldDeviceConnected) {
+    // do stuff here on connecting
+    Serial.println("Reconnected");
+    oldDeviceConnected = deviceConnected;
+  }
+}
 
 void setup() {
+  // Start serial communication 
   Serial.begin(115200);
 
+  // Init BME Sensor
+  initBME();
+
   // Create the BLE Device
-  BLEDevice::init("ESP32 BT BAK test");
+  BLEDevice::init(bleServerName);
 
   // Create the BLE Server
-  pServer = BLEDevice::createServer();
+  BLEServer *pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
   // Create the BLE Service
-  BLEService *pService = pServer->createService(SERVICE_UUID);
+  BLEService *bmeService = pServer->createService(SERVICE_UUID);
 
-  // Create a BLE Characteristic
-  pCharacteristic = pService->createCharacteristic(
-                      CHARACTERISTIC_UUID,
-                      BLECharacteristic::PROPERTY_READ   |
-                      BLECharacteristic::PROPERTY_WRITE  |
-                      BLECharacteristic::PROPERTY_NOTIFY |
-                      BLECharacteristic::PROPERTY_INDICATE
-                    );
+  // Create BLE Characteristics and Create a BLE Descriptor
+  // Temperature
+  #ifdef temperatureCelsius
+    bmeService->addCharacteristic(&bmeTemperatureCelsiusCharacteristics);
+    bmeTemperatureCelsiusDescriptor.setValue("Testing values from ESP32");
+    bmeTemperatureCelsiusCharacteristics.addDescriptor(&bmeTemperatureCelsiusDescriptor);
+  #else
+    bmeService->addCharacteristic(&bmeTemperatureFahrenheitCharacteristics);
+    bmeTemperatureFahrenheitDescriptor.setValue("BME temperature Fahrenheit");
+    bmeTemperatureFahrenheitCharacteristics.addDescriptor(&bmeTemperatureFahrenheitDescriptor);
+  #endif  
 
-  // https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.descriptor.gatt.client_characteristic_configuration.xml
-  // Create a BLE Descriptor
-  pCharacteristic->addDescriptor(new BLE2902());
-
+  // Humidity
+  bmeService->addCharacteristic(&bmeHumidityCharacteristics);
+  bmeHumidityDescriptor.setValue("BME humidity");
+  bmeHumidityCharacteristics.addDescriptor(new BLE2902());
+  
   // Start the service
-  pService->start();
+  bmeService->start();
 
   // Start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(false);
-  pAdvertising->setMinPreferred(0x0);  // set value to 0x00 to not advertise this parameter
-  BLEDevice::startAdvertising();
+  pServer->getAdvertising()->start();
   Serial.println("Waiting a client connection to notify...");
-  
 }
 
 void loop() {
-    
-    delay(100);
 
-    // notify changed value
-    if (deviceConnected) {
-      String toSendValue = "Some text to be send. Or a loooomg text which test the MTU size. This one is a short text TEST.";//data to be send
-      int str_len = toSendValue.length() + 1;
-      char char_array[str_len];
-      toSendValue.toCharArray(char_array, str_len);
+  checkToReconnect();
+  if (deviceConnected) {
+    if ((millis() - lastTime) > timerDelay) {
+      // Read temperature as Celsius (the default)
+      temp = 0.6f;//bme.readTemperature();
+      // Fahrenheit
+      tempF = 1.8*temp +32;
+      // Read humidity
+      hum = 25.0f;//bme.readHumidity();
+  
+      //Notify temperature reading from BME sensor
+      #ifdef temperatureCelsius
+        static char temperatureCTemp[6];
+        dtostrf(temp, 6, 2, temperatureCTemp);
+        //Set temperature Characteristic value and notify connected client
+        bmeTemperatureCelsiusCharacteristics.setValue(temperatureCTemp);
+        bmeTemperatureCelsiusCharacteristics.notify();
+        Serial.print("Temperature Celsius: ");
+        Serial.print(temp);
+        Serial.print(" ºC");
+      #else
+        static char temperatureFTemp[6];
+        dtostrf(tempF, 6, 2, temperatureFTemp);
+        //Set temperature Characteristic value and notify connected client
+        bmeTemperatureFahrenheitCharacteristics.setValue(temperatureFTemp);
+        bmeTemperatureFahrenheitCharacteristics.notify();
+        Serial.print("Temperature Fahrenheit: ");
+        Serial.print(tempF);
+        Serial.print(" ºF");
+      #endif
       
-      //pCharacteristic->setValue("\"W\":,\"L\":8,\"T\":21.5");
-      pCharacteristic->setValue(char_array);
-        pCharacteristic->notify();
-        delay(1000);
-        /*
-        pCharacteristic->setValue((uint8_t*)&value, 4);
-        pCharacteristic->notify();
-        value++;
-        delay(500); // bluetooth stack will go into congestion, if too many packets are sent, in 6 hours test i was able to go as low as 3ms
-        if (!sendOnlyOnce) {
-          pCharacteristic->setValue("Device is connected.");
-          pCharacteristic->notify();
-          sendOnlyOnce = true;
-        }
-        */
-        
+      //Notify humidity reading from BME
+      static char humidityTemp[6];
+      dtostrf(hum, 6, 2, humidityTemp);
+      //Set humidity Characteristic value and notify connected client
+      bmeHumidityCharacteristics.setValue(humidityTemp);
+      bmeHumidityCharacteristics.notify();   
+      Serial.print(" - Humidity: ");
+      Serial.print(hum);
+      Serial.println(" %");
+      
+      lastTime = millis();
     }
-    // disconnecting
-    if (!deviceConnected && oldDeviceConnected) {
-        delay(500); // give the bluetooth stack the chance to get things ready
-        pServer->startAdvertising(); // restart advertising
-        Serial.println("start advertising");
-        oldDeviceConnected = deviceConnected;
-    }
-    // connecting
-    if (deviceConnected && !oldDeviceConnected) {
-        // do stuff here on connecting
-        oldDeviceConnected = deviceConnected;
-    }
+  } else {
+    //no connected
+  }
 }
-
