@@ -1,8 +1,6 @@
 /*********
-  Rui Santos
-  Complete instructions at https://RandomNerdTutorials.com/esp32-ble-server-client/
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
-  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+  Testing BLE server for BAK device sensor
+
 *********/
 
 #include <BLEDevice.h>
@@ -12,20 +10,11 @@
 #include <Wire.h>
 #include <Arduino.h>
 
-//Default Temperature is in Celsius
-//Comment the next line for Temperature in Fahrenheit
-#define temperatureCelsius
 
 //BLE server name
 #define bleServerName "BLE BAK Test(ESP32)"
 
-//Adafruit_BME280 bme; // I2C
-
 BLEServer *pServer = NULL;//added
-
-float temp;
-float tempF;
-float hum;
 
 // Timer variables
 unsigned long lastTime = 0;
@@ -39,17 +28,12 @@ bool oldDeviceConnected = false;//added
 #define SERVICE_UUID "3d7b0044-fbc5-4284-b0f5-710049ec62c9"
 
 // Temperature Characteristic and Descriptor
-#ifdef temperatureCelsius
-  BLECharacteristic bmeTemperatureCelsiusCharacteristics("afd77861-8032-43a2-8369-a4f991913238", BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
-  BLEDescriptor bmeTemperatureCelsiusDescriptor(BLEUUID((uint16_t)0x2902));
-#else
-  BLECharacteristic bmeTemperatureFahrenheitCharacteristics("f78ebbff-c8b7-4107-93de-889a6a06d408", BLECharacteristic::PROPERTY_NOTIFY);
-  BLEDescriptor bmeTemperatureFahrenheitDescriptor(BLEUUID((uint16_t)0x2902));
-#endif
+  BLECharacteristic bmeDataSetCharacteristics("6518ea87-cc4e-469e-8a7d-c7d99d822fbe", BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
+  BLEDescriptor bmeDataSetDescriptor(BLEUUID((uint16_t)0x2902));
 
-// Humidity Characteristic and Descriptor
-BLECharacteristic bmeHumidityCharacteristics("6518ea87-cc4e-469e-8a7d-c7d99d822fbe", BLECharacteristic::PROPERTY_NOTIFY);
-BLEDescriptor bmeHumidityDescriptor(BLEUUID((uint16_t)0x2903));
+// Messparameter Characteristic and Descriptor
+BLECharacteristic bmeMessParamCharacteristics("afd77861-8032-43a2-8369-a4f991913238", BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
+BLEDescriptor bmeMessaParamDescriptor(BLEUUID((uint16_t)0x2903));
 
 //Setup callbacks onConnect and onDisconnect
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -60,15 +44,6 @@ class MyServerCallbacks: public BLEServerCallbacks {
     deviceConnected = false;
   }
 };
-
-void initBME(){
-  /*
-  if (!bme.begin(0x76)) {
-    Serial.println("Could not find a valid BME280 sensor, check wiring!");
-    while (1);
-  }
-  */
-}
 
 void checkToReconnect() //added
 {
@@ -91,9 +66,6 @@ void setup() {
   // Start serial communication 
   Serial.begin(115200);
 
-  // Init BME Sensor
-  initBME();
-
   // Create the BLE Device
   BLEDevice::init(bleServerName);
 
@@ -105,21 +77,19 @@ void setup() {
   BLEService *bmeService = pServer->createService(SERVICE_UUID);
 
   // Create BLE Characteristics and Create a BLE Descriptor
-  // Temperature
-  #ifdef temperatureCelsius
-    bmeService->addCharacteristic(&bmeTemperatureCelsiusCharacteristics);
-    bmeTemperatureCelsiusDescriptor.setValue("Testing values from ESP32");
-    bmeTemperatureCelsiusCharacteristics.addDescriptor(&bmeTemperatureCelsiusDescriptor);
-  #else
-    bmeService->addCharacteristic(&bmeTemperatureFahrenheitCharacteristics);
-    bmeTemperatureFahrenheitDescriptor.setValue("BME temperature Fahrenheit");
-    bmeTemperatureFahrenheitCharacteristics.addDescriptor(&bmeTemperatureFahrenheitDescriptor);
-  #endif  
+  
+  // Messparameter
+  bmeService->addCharacteristic(&bmeMessParamCharacteristics);
+  //bmeMessaParamDescriptor.setValue("BAK Param Characteristic");
+  //bmeMessParamCharacteristics.addDescriptor(new BLE2902());
 
-  // Humidity
-  bmeService->addCharacteristic(&bmeHumidityCharacteristics);
-  bmeHumidityDescriptor.setValue("BME humidity");
-  bmeHumidityCharacteristics.addDescriptor(new BLE2902());
+
+
+  // DataSet
+    bmeService->addCharacteristic(&bmeDataSetCharacteristics);
+    //bmeDataSetDescriptor.setValue("Testing values from ESP32");
+    //bmeDataSetCharacteristics.addDescriptor(&bmeDataSetDescriptor);
+
   
   // Start the service
   bmeService->start();
@@ -136,43 +106,25 @@ void loop() {
   checkToReconnect();
   if (deviceConnected) {
     if ((millis() - lastTime) > timerDelay) {
-      // Read temperature as Celsius (the default)
-      temp = 0.6f;//bme.readTemperature();
-      // Fahrenheit
-      tempF = 1.8*temp +32;
-      // Read humidity
-      hum = 25.0f;//bme.readHumidity();
-  
-      //Notify temperature reading from BME sensor
-      #ifdef temperatureCelsius
-        static char temperatureCTemp[6];
-        dtostrf(temp, 6, 2, temperatureCTemp);
-        //Set temperature Characteristic value and notify connected client
-        bmeTemperatureCelsiusCharacteristics.setValue(temperatureCTemp);
-        bmeTemperatureCelsiusCharacteristics.notify();
-        Serial.print("Temperature Celsius: ");
-        Serial.print(temp);
-        Serial.print(" ºC");
-      #else
-        static char temperatureFTemp[6];
-        dtostrf(tempF, 6, 2, temperatureFTemp);
-        //Set temperature Characteristic value and notify connected client
-        bmeTemperatureFahrenheitCharacteristics.setValue(temperatureFTemp);
-        bmeTemperatureFahrenheitCharacteristics.notify();
-        Serial.print("Temperature Fahrenheit: ");
-        Serial.print(tempF);
-        Serial.print(" ºF");
-      #endif
+
+      //Notify Messparameter reading from BME sensor
+      uint8_t array[26] = {0x42,0x41,0x4b,0x2d,0x32,0x33,0x30,0x31,0x00,0x01,0x13,0x01,0x17,0x0a,0x19,0x0b,0x2d,0x01,0x01,0x01,0x5e,0x00,0x26,0x02,0x58,0x00};
+      bmeMessParamCharacteristics.setValue(array,26);
+      bmeMessParamCharacteristics.notify();   
+      Serial.print("Sending values for Messparameter:");
+      String strr = (char*)array;
+      Serial.print(strr);
+      Serial.println("\n");
+
+      //Notify dataSet reading from BME sensor
+        uint8_t array2[6] = {0x01,0x40,0x00,0x20,0x02,0x12};
+        bmeDataSetCharacteristics.setValue(array2, 6);
+        bmeDataSetCharacteristics.notify();
+        Serial.print("Sending values of dataSet ");
+        String str = (char*)array2;
+        Serial.print(str);
+        Serial.print("\n");
       
-      //Notify humidity reading from BME
-      static char humidityTemp[6];
-      dtostrf(hum, 6, 2, humidityTemp);
-      //Set humidity Characteristic value and notify connected client
-      bmeHumidityCharacteristics.setValue(humidityTemp);
-      bmeHumidityCharacteristics.notify();   
-      Serial.print(" - Humidity: ");
-      Serial.print(hum);
-      Serial.println(" %");
       
       lastTime = millis();
     }
