@@ -1,6 +1,7 @@
 /*********
   Testing BLE server for BAK device sensor
 
+  github issues with permissions: https://www.jcchouinard.com/github-vscode-2fa-personal-access-token/
 *********/
 
 #include <BLEDevice.h>
